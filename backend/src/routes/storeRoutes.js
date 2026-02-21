@@ -4,20 +4,6 @@ const { authenticate, authorize } = require("../middleware/auth");
 
 const router = express.Router();
 
-function getWeekRange(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diffToMonday = day === 0 ? -6 : 1 - day;
-  const start = new Date(d);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() + diffToMonday);
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 7);
-
-  return { start, end };
-}
-
 router.use(authenticate, authorize("STORE"));
 
 router.get("/products", async (req, res, next) => {
@@ -75,17 +61,6 @@ router.post("/orders", async (req, res, next) => {
 
     if (cleanItems.length === 0) {
       return res.status(400).json({ message: "No valid order items found." });
-    }
-
-    const { start, end } = getWeekRange(new Date());
-    const existingOrder = await prisma.order.findFirst({
-      where: {
-        storeId,
-        submittedAt: { gte: start, lt: end }
-      }
-    });
-    if (existingOrder) {
-      return res.status(409).json({ message: "This store has already submitted an order this week." });
     }
 
     const productIds = [...new Set(cleanItems.map((item) => item.productId))];

@@ -15,6 +15,7 @@ enum Role {
 enum OrderStatus {
   SUBMITTED
   VIEWED
+  FULFILLED
 }
 
 model Store {

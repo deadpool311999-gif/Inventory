@@ -7,6 +7,33 @@ const router = express.Router();
 
 router.use(authenticate, authorize("OWNER"));
 
+function normalizeOrderItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return null;
+  }
+
+  const normalized = items
+    .map((item) => ({
+      productId: Number(item.productId),
+      quantity: Number(item.quantity)
+    }))
+    .filter((item) => Number.isInteger(item.productId) && Number.isInteger(item.quantity) && item.quantity > 0);
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  const mergedByProduct = normalized.reduce((acc, item) => {
+    acc[item.productId] = (acc[item.productId] || 0) + item.quantity;
+    return acc;
+  }, {});
+
+  return Object.entries(mergedByProduct).map(([productId, quantity]) => ({
+    productId: Number(productId),
+    quantity
+  }));
+}
+
 router.get("/stores", async (req, res, next) => {
   try {
     const stores = await prisma.store.findMany({
@@ -357,6 +384,97 @@ router.get("/orders/:id", async (req, res, next) => {
 
     return res.json(order);
   } catch (error) {
+    return next(error);
+  }
+});
+
+router.put("/orders/:id", async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    const { status, storeId, items } = req.body;
+
+    const existing = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true }
+    });
+    if (!existing) {
+      return res.status(404).json({ message: "Order not found." });
+    }
+
+    const updateData = {};
+
+    if (status !== undefined) {
+      const allowedStatuses = ["SUBMITTED", "VIEWED", "FULFILLED"];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ message: "Invalid status." });
+      }
+      updateData.status = status;
+    }
+
+    if (storeId !== undefined) {
+      const store = await prisma.store.findUnique({ where: { id: Number(storeId) } });
+      if (!store) {
+        return res.status(404).json({ message: "Store not found." });
+      }
+      updateData.storeId = Number(storeId);
+    }
+
+    if (items !== undefined) {
+      const normalizedItems = normalizeOrderItems(items);
+      if (!normalizedItems) {
+        return res.status(400).json({ message: "items[] must include valid productId and quantity > 0." });
+      }
+
+      const productIds = normalizedItems.map((item) => item.productId);
+      const productCount = await prisma.product.count({
+        where: { id: { in: productIds } }
+      });
+      if (productCount !== productIds.length) {
+        return res.status(400).json({ message: "Order includes invalid product(s)." });
+      }
+
+      await prisma.$transaction([
+        prisma.orderItem.deleteMany({ where: { orderId } }),
+        prisma.orderItem.createMany({
+          data: normalizedItems.map((item) => ({
+            orderId,
+            productId: item.productId,
+            quantity: item.quantity
+          }))
+        })
+      ]);
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: updateData
+      });
+    }
+
+    const updated = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        store: true,
+        items: { include: { product: { include: { category: true } } } }
+      }
+    });
+
+    return res.json(updated);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.delete("/orders/:id", async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.id);
+    await prisma.order.delete({ where: { id: orderId } });
+    return res.status(204).send();
+  } catch (error) {
+    if (error.code === "P2025") {
+      return res.status(404).json({ message: "Order not found." });
+    }
     return next(error);
   }
 });
