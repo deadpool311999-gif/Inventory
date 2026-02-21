@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  STORE
+}
+
+enum OrderStatus {
+  SUBMITTED
+  VIEWED
+}
+
+model Store {
+  id            Int                        @id @default(autoincrement())
+  name          String
+  location      String?
+  active        Boolean                    @default(true)
+  users         User[]
+  availabilities StoreProductAvailability[]
+  orders        Order[]
+
+  @@map("stores")
+}
+
+model User {
+  id                 Int        @id @default(autoincrement())
+  email              String     @unique
+  passwordHash       String     @map("password_hash")
+  role               Role
+  storeId            Int?       @map("store_id")
+  store              Store?     @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdCategories  Category[] @relation("CategoryCreatedBy")
+  createdProducts    Product[]  @relation("ProductCreatedBy")
+
+  @@map("users")
+}
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  createdById Int       @map("created_by")
+  createdBy   User      @relation("CategoryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  products    Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            Int                        @id @default(autoincrement())
+  name          String
+  imageUrl      String?                    @map("image_url")
+  sizeDescription String?                  @map("size_description")
+  categoryId    Int                        @map("category_id")
+  category      Category                   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  active        Boolean                    @default(true)
+  createdById   Int                        @map("created_by")
+  createdBy     User                       @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  availabilities StoreProductAvailability[]
+  orderItems    OrderItem[]
+
+  @@unique([name, sizeDescription])
+  @@map("products")
+}
+
+model StoreProductAvailability {
+  id          Int      @id @default(autoincrement())
+  storeId     Int      @map("store_id")
+  productId   Int      @map("product_id")
+  isAvailable Boolean  @default(true) @map("is_available")
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, productId])
+  @@map("store_product_availability")
+}
+
+model Order {
+  id          Int         @id @default(autoincrement())
+  storeId     Int         @map("store_id")
+  store       Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  submittedAt DateTime    @default(now()) @map("submitted_at")
+  status      OrderStatus @default(SUBMITTED)
+  items       OrderItem[]
+
+  @@index([storeId, submittedAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int     @map("order_id")
+  productId Int     @map("product_id")
+  quantity  Int
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([orderId, productId])
+  @@map("order_items")
+}
